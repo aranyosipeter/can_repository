@@ -1,0 +1,390 @@
+// These headers for LCD Display
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>  
+
+// These headers for SPI connection to the wireless connction with NRF24L01
+#include <SPI.h>
+#include <Mirf.h>
+#include <nRF24L01.h>
+#include <MirfHardwareSpiDriver.h>
+
+#define IRQ 2
+#define MENU 20
+#define LEFT_CONT 16
+#define RIGHT_CONT 17
+#define LEFT_ACC_BUT 1
+#define LEFT_DCC_BUT 0
+#define RIGHT_ACC_BUT 14
+#define RIGHT_DCC_BUT 15
+
+// LEDs
+#define LEFT_ACC_LED 3 
+#define LEFT_DCC_LED 5
+#define LEFT_STD_LED 4
+#define RIGHT_ACC_LED 6 
+#define RIGHT_DCC_LED 10
+#define RIGHT_STD_LED 9
+
+//LCD Display
+#define I2C_ADDR    0x27  
+#define BACKLIGHT_PIN  3
+#define En_pin  2
+#define Rw_pin  1
+#define Rs_pin  0
+#define D4_pin  4
+#define D5_pin  5
+#define D6_pin  6
+#define D7_pin  7
+#define LED 13
+#define  LED_OFF  1
+#define  LED_ON  1
+
+LiquidCrystal_I2C  lcd(I2C_ADDR,En_pin,Rw_pin,Rs_pin,D4_pin,D5_pin,D6_pin,D7_pin);
+
+/************************* Flags **************************/
+
+boolean             dataRec                = false;      // nincs hasznalatban
+
+/**************** Declaration of parameters ***************/
+
+int                 j, k, s                = 0;         // for ciklus valtozoja
+
+int                 leftSlide              = 0;
+int                 rightSlide             = 0;
+int                 prevLeft               = 0;
+int                 prevRight              = 0;
+
+boolean             leftAccBut             = false;
+boolean             leftDecBut             = false;
+boolean             rightAccBut            = false;
+boolean             rightDecBut            = false;
+
+int                 analogButton           = 0;
+int                 actualOpt              = 0;
+int                 workingOpt             = 0;
+boolean             menu                   = false;
+boolean             nextOpt                = false;
+boolean             prevOpt                = false;
+boolean             selectOpt              = false;
+
+boolean             menuEnable             = false;
+boolean             timerEnable            = false;
+boolean             buttonDec              = false;
+boolean             buttonInc              = false;
+unsigned long       menuTimer              = 0;
+unsigned long       buttonTimer            = 0;       
+
+int                 timer                  = 0;
+int                 prevTimer              = 0;
+
+byte                command                = B00000000; // egyeb parancsok
+int                 directRight            = 0;        // jobboldali lanctalp iranya
+int                 directLeft             = 0;        // baloldali lanctalp iranya
+int                 acceRight              = 0;        // jobboldali lanctalp PWM jele
+int                 acceLeft               = 0;        // baloldai lanctalp PWM jele
+
+int                 leftLEDs               = 0;        // baloldali LED-ek PWM jele
+int                 rightLEDs              = 0;        // jobboldali LED-ek PWM jele
+byte                lifeSignal             = B00000000;
+
+
+/******************* Buffers for the transreceiver *****************/
+
+int            txbuff[9];                        // kuldesre varo adatok tombje
+int            rxbuff[9];                        // bejovo adatok tombje
+
+/************************** Setup *******************************/
+void setup()  {
+  Serial.begin(9600);
+  Wire.begin();
+  IOInit();
+  mirfInit();
+  LCDInit();
+  attachInterrupt(0,voidResponse, LOW);
+}
+
+/************************** Loop *******************************/
+void loop()   {
+  menuSelect();
+  //slideController();
+  LEDControl();
+}
+
+/********************** LCD Init *****************************/
+void LCDInit(){
+  lcd.begin (16,2);  
+  lcd.setBacklightPin(BACKLIGHT_PIN,POSITIVE);
+  lcd.setBacklight(LED_ON);
+}
+
+/********************** I/O Init *****************************/
+void IOInit(){
+  pinMode(IRQ, INPUT);
+  pinMode(MENU, INPUT);
+  
+  // Defining slide controllers
+  pinMode(LEFT_CONT, INPUT);
+  pinMode(RIGHT_CONT, INPUT);
+  
+  // Defining buttons
+  pinMode(LEFT_ACC_BUT, INPUT);
+  pinMode(LEFT_DCC_BUT, INPUT);
+  pinMode(RIGHT_ACC_BUT, INPUT);
+  pinMode(RIGHT_DCC_BUT, INPUT);
+  
+  //Defining LED's  
+  pinMode(LEFT_ACC_LED, OUTPUT);
+  pinMode(LEFT_DCC_LED, OUTPUT);
+  pinMode(LEFT_STD_LED, OUTPUT);
+  pinMode(RIGHT_ACC_LED, OUTPUT);
+  pinMode(RIGHT_DCC_LED, OUTPUT);
+  pinMode(RIGHT_STD_LED, OUTPUT);  
+}
+/******************* Initalizing MiRF ************************/
+void mirfInit(){
+  Mirf.payload = 16;
+  Mirf.channel = 80;
+  Mirf.spi = &MirfHardwareSpi;
+  Mirf.init();
+  Mirf.setRADDR((byte *)"cont1");
+  Mirf.setTADDR((byte *)"tank1");
+  Mirf.config();
+}
+
+/******************** Function for sending packet ********************/
+void voidPacketSend(){
+    txbuff[0] = command;
+    txbuff[1] = directRight;
+    txbuff[2] = directLeft;
+    txbuff[3] = acceRight;
+    txbuff[4] = acceLeft;
+    txbuff[5] = 0;
+    txbuff[6] = 0;
+    txbuff[7] = 0;
+    txbuff[8] = 0;
+    Mirf.send((byte *)&txbuff);
+    while(Mirf.isSending()){
+    }
+}
+
+/****************** Filling up server data *******************/
+void voidGetPacket(){
+  if (Mirf.dataReady() == true){
+    Mirf.getData((byte *) &rxbuff); 
+  }
+  lifeSignal = rxbuff[0];
+}
+
+/************************ Response **************************/
+void voidResponse(){
+  voidGetPacket();
+  voidPacketSend();
+}
+
+/********************* Controlling with sliders **********************/
+void slideController(){ 
+  dataCollect();
+  // Backward 
+  if (( rightSlide < 383 ) && ( rightSlide >= 0 )){
+    directRight = -1;
+    acceRight = (( 383 - rightSlide ) / 3 );
+  }
+  if (( leftSlide < 383 ) && ( leftSlide >= 0 )){
+    directLeft = -1;
+    acceLeft = (( 383 - leftSlide )  / 3 );
+  }
+  // Forward
+  if (( rightSlide < 1023 ) && ( rightSlide >= 639 )){
+    directRight = 1;
+    acceRight = (( rightSlide - 639 )  / 3 );
+  }
+  if (( leftSlide < 1023 ) && ( leftSlide >= 639 )){
+    directLeft = 1;
+    acceLeft = (( leftSlide - 639 ) / 3 );
+  }
+  // Standby
+  if (( rightSlide > 383 ) && ( rightSlide < 639 )){
+    directRight = 0;
+    acceRight = 0;
+  }
+  if (( leftSlide > 383 ) && ( leftSlide < 639 )){
+    directLeft = 0;
+    acceLeft = 0;
+  }
+}
+
+/****************** Controlling with buttons ******************/
+void digController(){
+  if ( menuEnable == false ) {
+    leftAccBut = digitalRead(LEFT_ACC_BUT);
+    leftDecBut = digitalRead(LEFT_DCC_BUT);
+    rightAccBut = digitalRead(RIGHT_ACC_BUT);
+    rightDecBut = digitalRead(RIGHT_DCC_BUT);
+    if ( leftAccBut == HIGH && acceLeft <= 135 ){
+      acceLeft = acceLeft + 15;
+    }
+    if ( leftDecBut == HIGH && acceLeft >= 15 ){
+      acceLeft = acceLeft - 15;
+    }
+    if ( rightAccBut == HIGH && acceRight <= 135 ){
+      acceRight = acceRight + 15;
+    }
+    if ( rightDecBut == HIGH && acceRight >= 15 ){
+      acceRight = acceRight - 15;
+    }
+    lcd.setCursor(0,0);
+    lcd.print(acceLeft);
+    lcd.setCursor(0,11);
+    lcd.print(acceRight);
+  }
+}
+
+/************************ Menu select *************************/
+void menuSelect(){
+  analogButton = analogRead(MENU);
+  Serial.print("AnalogButton: ");
+  Serial.println(analogButton, DEC);
+  if (( analogButton > 768 ) && ( menuEnable == false )){
+    menuTimer = millis();
+    timerEnable = true;
+    Serial.println("timerEnable true");
+  }
+  if (( analogButton > 768 ) && ( menuEnable == true )){
+    menuTimer = millis();
+    timerEnable = true;
+    Serial.println("Exit menu");
+  }
+  menuTiming();  
+  
+  if ( menuEnable == true ){
+    acceRight = 0;
+    acceLeft = 0;
+    directRight = 0;
+    directLeft = 0;
+    nextOpt = digitalRead(RIGHT_ACC_BUT);
+    prevOpt = digitalRead(RIGHT_DCC_BUT);
+    //selectOpt = digitalRead(RIGHT_DCC_BUT);
+    Serial.print("Actual option: ");
+    Serial.println(actualOpt);
+    if ( nextOpt == true ){ 
+      buttonTimer = millis();
+      buttonInc = true;
+    }
+    if ( prevOpt == true ){
+      buttonTimer = millis();
+      buttonDec = true;
+    }
+    buttonTiming();  
+    switch (actualOpt) {
+      case 0: 
+              lcd.setCursor(1,0);
+              lcd.print("Analog mode    ");
+              Serial.println("Analog mode    ");
+              break;
+      case 1: 
+              lcd.setCursor(1,0);
+              lcd.print("Digital mode   ");
+              Serial.println("Digital mode    ");
+              break;
+     default: 
+              lcd.setCursor(1,0);
+              lcd.print("No more option!");
+              Serial.println("No more    ");
+              break;
+    }
+    /*if ( selectOpt == true ){
+      workingOpt = actualOpt;
+      menuEnable = false;
+    }*/
+  workingOpt = actualOpt;
+  }
+  else { 
+    lcd.clear();
+  }
+  
+  if (( workingOpt == 0 ) && ( menuEnable == false )) {
+    slideController();
+  }
+  else if (( workingOpt == 1 ) && ( menuEnable == false )){
+    digController();
+  }
+
+
+}
+
+/******************** Menu timer section **********************/
+void menuTiming(){
+  if (( timerEnable == true ) && ( menuEnable == false )) {
+    if ( menuTimer + 500 < millis() ) {
+      menuEnable = true ;
+      timerEnable = false;
+    }
+  }
+  if (( timerEnable == true ) && ( menuEnable == true )) {
+    if ( menuTimer + 500 < millis() ) {
+      menuEnable = false;
+      timerEnable = false;
+    }
+  }
+}
+
+/*******************Button timer section **********************/
+void buttonTiming(){
+ if ( buttonInc == true ) {
+    if ( buttonTimer + 100 < millis() ) {
+      buttonInc = false;
+      actualOpt++;
+    }
+  } 
+   if ( buttonDec == true ) {
+    if ( buttonTimer + 100 < millis() ) {
+      buttonDec = false;
+      actualOpt--;
+    }
+  } 
+}
+
+/*********************** Data collect *************************/
+void dataCollect(){
+  rightSlide = analogRead(RIGHT_CONT);
+  leftSlide = analogRead(LEFT_CONT); 
+}
+
+/********************* LED control ***************************/
+void LEDControl(){
+  //leftLEDs = acceLeft / 1.5;
+  //rightLEDs = acceRight / 1.5;
+  // Right side of the controller
+  if ( directRight == 0 ){
+    analogWrite(RIGHT_ACC_LED, 0);
+    analogWrite(RIGHT_DCC_LED, 0);
+    digitalWrite(RIGHT_STD_LED, HIGH);
+  }
+  if ( directRight == 1 ){
+    analogWrite(RIGHT_ACC_LED, acceRight);
+    analogWrite(RIGHT_DCC_LED, 0);
+    digitalWrite(RIGHT_STD_LED, LOW);
+  }
+  if ( directRight == -1 ){
+    analogWrite(RIGHT_ACC_LED , 0);
+    analogWrite(RIGHT_DCC_LED , acceRight);
+    digitalWrite(RIGHT_STD_LED , LOW);
+  }
+  // Left side of the controller
+  if ( directLeft == 0 ){
+    analogWrite(LEFT_ACC_LED, 0);
+    analogWrite(LEFT_DCC_LED, 0);
+    digitalWrite(LEFT_STD_LED, HIGH);
+  }
+  if ( directLeft == 1 ){
+    analogWrite(LEFT_ACC_LED, acceLeft);
+    analogWrite(LEFT_DCC_LED, 0);
+    digitalWrite(LEFT_STD_LED, LOW);
+  }
+  if ( directLeft == -1 ){
+    analogWrite(LEFT_ACC_LED, 0);
+    analogWrite(LEFT_DCC_LED, acceLeft);
+    digitalWrite(LEFT_STD_LED, LOW);
+  }
+}
+
