@@ -10,6 +10,9 @@
 #define BS_PRIO           2
 #define BS_PRIO_MASK      B00000111
 
+#define BS_PGN            8
+#define BS_PGN_MASK       0xFFFC0000
+
 
 unsigned long rxId;
 unsigned char len = 0;
@@ -38,7 +41,7 @@ void loop(){
   if (CAN0.readMsgBuf(&len, rxBuf) == CAN_OK){
     rxId = CAN0.getCanId(); 
     
-    processCanID(&rxId, &Prio, Res, DP, &PF, &PS, &SA);
+    processCanID(&rxId, &Prio, Res, DP, &PF, &PS, &SA, &PGN);
                        // Get message ID
     Serial.print("ID: ");
     Serial.print(rxId, HEX);
@@ -54,7 +57,7 @@ void loop(){
     Serial.print("Source Addres: ");
     Serial.println(SA, HEX);
     Serial.print("PGN: ");
-    Serial.println(SA, HEX);
+    Serial.println(PGN);
     
     Serial.print("  Data: ");
     for (int i = 0; i<len; i++){
@@ -68,7 +71,7 @@ void loop(){
   }
 }
 
-void processCanID(unsigned long* ID, byte* Prio, boolean Res, boolean DP, byte* PF, byte* PS, byte* SA){
+void processCanID(unsigned long* ID, byte* Prio, boolean Res, boolean DP, byte* PF, byte* PS, byte* SA, unsigned long* PGN){
   byte splittedID[3]; 
   // Let's split uint32 ID
   splittedID[0] = (byte)(*ID);
@@ -82,5 +85,6 @@ void processCanID(unsigned long* ID, byte* Prio, boolean Res, boolean DP, byte* 
   *PF = splittedID[2];
   *PS = splittedID[1];
   *SA = splittedID[0];
+  *PGN = ((*ID >> BS_PGN) && BS_PGN_MASK);
 }
 
