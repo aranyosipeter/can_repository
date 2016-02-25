@@ -46,18 +46,18 @@ void loop(){
     Serial.print("ID: ");
     Serial.print(rxId, HEX);
     
-    Serial.print("Prio: ");
-    Serial.println(Prio);
-    Serial.print("Data Page: ");
-    Serial.println(DP);
-    Serial.print("PDU Format: ");
-    Serial.println(PF);
-    Serial.print("PDU Specific: ");
-    Serial.println(PS);
-    Serial.print("Source Addres: ");
-    Serial.println(SA, HEX);
-    Serial.print("PGN: ");
-    Serial.println(PGN);
+    Serial.print(" Prio: ");
+    Serial.print(Prio);
+    Serial.print(" Data Page: ");
+    Serial.print(DP);
+    Serial.print(" PDU Format: ");
+    Serial.print(PF);
+    Serial.print(" PDU Specific: ");
+    Serial.print(PS);
+    Serial.print(" Source Addres: ");
+    Serial.print(SA, HEX);
+    Serial.print(" PGN: ");
+    Serial.print(PGN);
     
     Serial.print("  Data: ");
     for (int i = 0; i<len; i++){
